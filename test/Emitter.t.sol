@@ -18,7 +18,7 @@ contract EmitterTest is Test {
         emitter = new Emitter(
             now, // init
             start,
-            20, // c
+            20 ether, // c
             uint(1 ether) / 120, // lam
             address(token),
             address(0x0dd)
