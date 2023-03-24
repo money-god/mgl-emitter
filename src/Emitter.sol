@@ -254,15 +254,15 @@ contract Emitter {
         // base conversion: mul 2**18 / 2**192
         r >>= 174;
     }
-
     /// Issuance calculation
     // @notice Amount at beginning of `n` blocks after launch
     function startingSupplyMonths(uint256 n) public view returns (int256) {
         return
-            powWad(
-                int256(mulWad(start, mulWad(c, e))),
+            int256(mulWad(start, 
+            uint256(powWad(
+                int256(mulWad(c, e)),
                 -1 * int256(mul(lam, n))
-            );
+            ))));
     }
 
     // @notice Number of months since init
