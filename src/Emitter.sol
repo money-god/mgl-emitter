@@ -3,18 +3,23 @@ pragma solidity 0.6.7;
 
 abstract contract TokenLike {
     function transfer(address, uint256) external virtual returns (bool);
+
+    function balanceOf(address) external view virtual returns (uint256);
 }
 
+/// @notice Immutable RATE token emitter
+/// @dev Contract assumes the start balance has been deposited to the contract
+/// @dev If additional tokens are sent to the contract they will be distributed in the next emission;
 contract Emitter {
     uint256 public immutable init; // timestamp when distribution starts, unix timestamp
     uint256 public immutable start; // token initial amount that will be distributed, WAD
     uint256 public immutable c; // WAD
     uint256 public immutable lam; // WAD
 
-    TokenLike public immutable token;
-    address public immutable receiver;
+    TokenLike public immutable token; // token distributed by the contract
+    address public immutable receiver; // receiver of the tokens
 
-    mapping(uint256 => bool) public distributed; // Mapping of month -> bool (true if month was emitted)
+    uint256 public lastMonthDistributed; // last month to be distributed
 
     uint256 public constant e = 2718281828459045235; // WAD
     uint256 public constant WAD = 10 ** 18;
@@ -43,6 +48,16 @@ contract Emitter {
     }
 
     /// Math - from vectorized/solady, transmissions11/solmate and reflexer-labs/geb
+    function add(uint x, uint y) public pure returns (uint z) {
+        z = x + y;
+        require(z >= x, "uint-uint-add-overflow");
+    }
+
+    function sub(uint x, uint y) public pure returns (uint z) {
+        z = x - y;
+        require(z <= x, "uint-uint-sub-underflow");
+    }
+
     function mul(uint x, uint y) internal pure returns (uint z) {
         require(y == 0 || (z = x * y) / y == x, "mul-overflow");
     }
@@ -61,8 +76,7 @@ contract Emitter {
             // Scale the result down by 1e18.
             r := sdiv(r, 1000000000000000000)
         }
-    }    
-
+    }
 
     /// @dev Equivalent to `(x * y) / WAD` rounded down.
     function mulWad(uint256 x, uint256 y) internal pure returns (uint256 z) {
@@ -254,35 +268,39 @@ contract Emitter {
         // base conversion: mul 2**18 / 2**192
         r >>= 174;
     }
+
     /// Issuance calculation
     // @notice Amount at beginning of `n` blocks after launch
-    function startingSupplyMonths(uint256 n) public view returns (int256) {
+    // @param n Month number since start of distribution
+    function startingSupplyMonths(uint256 n) public view returns (uint256) {
         return
-            int256(mulWad(start, 
-            uint256(powWad(
-                int256(mulWad(c, e)),
-                -1 * int256(mul(lam, n))
-            ))));
+            mulWad(
+                start,
+                uint256(powWad(int256(mulWad(c, e)), -int256(mul(lam, n))))
+            );
     }
 
     // @notice Number of months since init
-    // @dev Returns 0 for first month
+    // @dev Returns 1 for first month
     function currentMonth() public view returns (uint256) {
-        return (now - init) / MONTH;
-    }
-
-    // @notice Emits tokens for the current month
-    function emitTokens() external {
-        emitTokens(currentMonth());
+        return add(sub(now, init) / MONTH, 1);
     }
 
     // @notice Emits tokens for a specific month
-    // @param month Month number since start of distribution
-    // @dev Reverts for duplicate requests for a given month, reverts if month is in the future
-    function emitTokens(uint month) public {
-        require(month <= currentMonth(), "Too soon");
-        require(!distributed[month], "Month already distributed");
-        token.transfer(receiver, uint256(startingSupplyMonths(month)));
-        distributed[month] = true;
+    // @dev Reverts if already distributed in the same month
+    function emitTokens() public {
+        uint256 month = currentMonth();
+        require(month > lastMonthDistributed, "already distributed");
+
+        uint256 distributionAmount = sub(
+            token.balanceOf(address(this)),
+            startingSupplyMonths(month)
+        );
+
+        require(
+            token.transfer(receiver, distributionAmount),
+            "transfer failed"
+        );
+        lastMonthDistributed = month;
     }
 }
